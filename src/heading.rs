@@ -33,22 +33,10 @@ impl HeadingManager {
         let trimmed = text.trim();
         if self.detect_existing_number(level, trimmed).is_some() {
             match level {
-                1 => {
-                    // "8 タイトル" → "タイトル"
-                    if let Some(rest) = trimmed.split_once(' ') {
-                        return rest.1.to_string();
-                    }
-                }
-                2 => {
-                    // "8.1 タイトル" → "タイトル"
-                    if let Some(rest) = trimmed.split_once(' ') {
-                        return rest.1.to_string();
-                    }
-                }
-                3 => {
-                    // "8.1.1 タイトル" → "タイトル"
-                    if let Some(rest) = trimmed.split_once(' ') {
-                        return rest.1.to_string();
+                1 | 2 | 3 => {
+                    // "8.1　タイトル" → "タイトル" (全角・半角スペース両対応)
+                    if let Some(pos) = trimmed.find(|c: char| c.is_whitespace()) {
+                        return trimmed[pos..].trim_start().to_string();
                     }
                 }
                 4 => {
@@ -107,9 +95,10 @@ impl HeadingManager {
         let trimmed = text.trim();
         match level {
             1 => {
-                // "8 タイトル" → "8"
+                // "8 タイトル" or "8. タイトル" → "8"
                 if let Some(num_str) = trimmed.split_whitespace().next() {
-                    if num_str.parse::<u32>().is_ok() {
+                    let stripped = num_str.trim_end_matches('.');
+                    if !stripped.is_empty() && stripped.parse::<u32>().is_ok() {
                         return Some(num_str.to_string());
                     }
                 }

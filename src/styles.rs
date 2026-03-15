@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::css::{CssBorder, CssRules, CssStyle};
 use docx_rs::*;
 
 /// pt → half-point (Word内部単位) への変換
@@ -35,7 +36,7 @@ pub const BULLET_STYLE_ID: &str = "BulletList";
 /// - Heading1-4: テーマフォント、サイズ、bold、keepNext、outlineLvl
 /// - AbstractNumbering (id=8): 見出し番号 Level 0-3
 /// - Numbering (id=2): abstractNumId=8
-pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
+pub fn setup_document_styles(docx: Docx, config: &Config, css_rules: Option<&CssRules>) -> Docx {
     // --- docDefaults ---
     // テーマファイルを生成できないため、実フォント名を直接指定
     let default_fonts = RunFonts::new()
@@ -82,10 +83,15 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .bold()
         .fonts(heading1_fonts)
         .outline_lvl(0);
-    // sample.docx 準拠: numId のみ（ilvl は省略 → デフォルト 0）
-    heading1_style.paragraph_property = heading1_style
-        .paragraph_property
-        .numbering_property(NumberingProperty::new().id(NumberingId::new(HEADING_NUM_ID)));
+    let depth = config.numbering.heading_numbering_depth;
+    // h1_title モードでは H1 に numbering を付けない（タイトル扱い）
+    // heading_numbering_depth < 1 の場合も H1 に numbering を付けない
+    // heading_numbering が false の場合は全見出しの numbering を無効化
+    if config.numbering.heading_numbering && !config.numbering.h1_title && depth >= 1 {
+        heading1_style.paragraph_property = heading1_style
+            .paragraph_property
+            .numbering_property(NumberingProperty::new().id(NumberingId::new(HEADING_NUM_ID)));
+    }
 
     // --- 見出し2 (id="2") ---
     // basedOn=見出し1("1"), next=Normal("a")
@@ -98,10 +104,15 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .next("Normal")
         .size(pt_to_half_point(config.sizes.heading2)) // 12pt = sz 24
         .outline_lvl(1);
-    // sample.docx 準拠: ilvl のみ（numId は basedOn=heading1 から継承）
-    {
+    // h1_title モード: ilvl を 1 つ下げる (H2→0, 通常: H2→1)
+    if config.numbering.heading_numbering && depth >= 2 {
+        let ilvl = if config.numbering.h1_title { 0 } else { 1 };
         let mut np = NumberingProperty::new();
-        np.level = Some(IndentLevel::new(1));
+        if config.numbering.h1_title {
+            // h1_title では heading1 に numId がないため、明示的に指定
+            np = np.id(NumberingId::new(HEADING_NUM_ID));
+        }
+        np.level = Some(IndentLevel::new(ilvl));
         heading2_style.paragraph_property =
             heading2_style.paragraph_property.numbering_property(np);
     }
@@ -125,9 +136,12 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .bold()
         .fonts(heading3_fonts)
         .outline_lvl(2);
-    heading3_style.paragraph_property = heading3_style
-        .paragraph_property
-        .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(2));
+    if config.numbering.heading_numbering && depth >= 3 {
+        let ilvl = if config.numbering.h1_title { 1 } else { 2 };
+        heading3_style.paragraph_property = heading3_style
+            .paragraph_property
+            .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(ilvl));
+    }
 
     // --- 見出し4 (id="4") ---
     // basedOn=Normal("a"), next=Normal("a")
@@ -151,9 +165,12 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
             None,
         )
         .outline_lvl(3);
-    heading4_style.paragraph_property = heading4_style
-        .paragraph_property
-        .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(3));
+    if config.numbering.heading_numbering && depth >= 4 {
+        let ilvl = if config.numbering.h1_title { 2 } else { 3 };
+        heading4_style.paragraph_property = heading4_style
+            .paragraph_property
+            .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(ilvl));
+    }
 
     // --- 見出し5 (id="5") ---
     // basedOn=Normal, next=Normal
@@ -169,9 +186,12 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .bold()
         .fonts(heading5_fonts)
         .outline_lvl(4);
-    heading5_style.paragraph_property = heading5_style
-        .paragraph_property
-        .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(4));
+    if config.numbering.heading_numbering && depth >= 5 {
+        let ilvl = if config.numbering.h1_title { 3 } else { 4 };
+        heading5_style.paragraph_property = heading5_style
+            .paragraph_property
+            .numbering(NumberingId::new(HEADING_NUM_ID), IndentLevel::new(ilvl));
+    }
 
     // --- 見出し番号定義 (abstractNumId=8, numId=2) ---
     let mut abstract_numbering = AbstractNumbering::new(HEADING_ABSTRACT_NUM_ID)
@@ -315,7 +335,7 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
     // sample: leftChars=100/left=210, rightChars=100/right=100, firstLineChars=100/firstLine=100
     // docx-rs は rightChars, firstLineChars を出力できないため、
     // 絶対値を全角1文字幅 (210 twip = 2 × drawingGridHorizontalSpacing) に補正する
-    let body_text_style = Style::new(BODY_TEXT_STYLE_ID, StyleType::Paragraph)
+    let mut body_text_style = Style::new(BODY_TEXT_STYLE_ID, StyleType::Paragraph)
         .name("本文ｰ見出し")
         .based_on("Normal")
         .indent(
@@ -324,6 +344,28 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
             Some(config.indent.body_right),
             Some(config.indent.body_left_chars),
         );
+
+    // 行間設定
+    if config.spacing.line.is_some()
+        || config.spacing.before.is_some()
+        || config.spacing.after.is_some()
+    {
+        let mut ls = LineSpacing::new();
+        if let Some(line_pt) = config.spacing.line {
+            let twips = pt_to_twip(line_pt);
+            ls = ls.line(twips).line_rule(LineSpacingType::Exact);
+        }
+        if let Some(before_pt) = config.spacing.before {
+            ls = ls.before(pt_to_twip(before_pt) as u32);
+        }
+        if let Some(after_pt) = config.spacing.after {
+            ls = ls.after(pt_to_twip(after_pt) as u32);
+        }
+        body_text_style.paragraph_property = body_text_style
+            .paragraph_property
+            .clone()
+            .line_spacing(ls);
+    }
 
     // --- 箇条書き用 Numbering 定義 (abstractNumId=9, numId=3) ---
     let bullet_chars = [
@@ -359,7 +401,17 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .name("Bullet List")
         .based_on("Normal");
 
-    docx.add_style(normal_style)
+    // --- CSS による見出しスタイル上書き ---
+    if let Some(css) = css_rules {
+        apply_css_to_heading(&mut heading1_style, css.h1.as_ref(), "h1");
+        apply_css_to_heading(&mut heading2_style, css.h2.as_ref(), "h2");
+        apply_css_to_heading(&mut heading3_style, css.h3.as_ref(), "h3");
+        apply_css_to_heading(&mut heading4_style, css.h4.as_ref(), "h4");
+        apply_css_to_heading(&mut heading5_style, css.h5.as_ref(), "h5");
+    }
+
+    let mut docx = docx
+        .add_style(normal_style)
         .add_style(body_text_style)
         .add_style(heading1_style)
         .add_style(heading2_style)
@@ -370,5 +422,132 @@ pub fn setup_document_styles(docx: Docx, config: &Config) -> Docx {
         .add_abstract_numbering(abstract_numbering)
         .add_abstract_numbering(bullet_abstract)
         .add_numbering(numbering)
-        .add_numbering(bullet_numbering)
+        .add_numbering(bullet_numbering);
+
+    // --- CSS classes → Character スタイル登録 ---
+    if let Some(css) = css_rules {
+        for (class_name, css_style) in &css.classes {
+            let style_id = format!("css-{}", class_name);
+            let mut style = Style::new(&style_id, StyleType::Character)
+                .name(&format!("CSS: {}", class_name));
+
+            if let Some(ref color) = css_style.color {
+                style = style.color(color);
+            }
+            if let Some(true) = css_style.bold {
+                style = style.bold();
+            }
+            if let Some(true) = css_style.italic {
+                style = style.italic();
+            }
+            if let Some(true) = css_style.underline {
+                style = style.underline("single");
+            }
+            if let Some(ref family) = css_style.font_family {
+                let fonts = RunFonts::new()
+                    .ascii(family)
+                    .hi_ansi(family)
+                    .east_asia(family)
+                    .cs(family);
+                style = style.fonts(fonts);
+            }
+            if let Some(pt) = css_style.font_size_pt {
+                style = style.size(pt_to_half_point(pt as f64));
+            }
+
+            docx = docx.add_style(style);
+        }
+    }
+
+    docx
+}
+
+fn apply_css_to_heading(style: &mut Style, css: Option<&CssStyle>, _selector: &str) {
+    let css = match css {
+        Some(c) => c,
+        None => return,
+    };
+
+    if let Some(pt) = css.font_size_pt {
+        style.run_property.sz = Some(Sz::new(pt_to_half_point(pt as f64)));
+        style.run_property.sz_cs = Some(SzCs::new(pt_to_half_point(pt as f64)));
+    }
+    if let Some(ref color) = css.color {
+        style.run_property.color = Some(Color::new(color));
+    }
+    if let Some(bold) = css.bold {
+        if bold {
+            style.run_property.bold = Some(Bold::new());
+            style.run_property.bold_cs = Some(BoldCs::new());
+        } else {
+            style.run_property.bold = None;
+            style.run_property.bold_cs = None;
+        }
+    }
+    if let Some(true) = css.italic {
+        style.run_property.italic = Some(Italic::new());
+        style.run_property.italic_cs = Some(ItalicCs::new());
+    }
+    if let Some(true) = css.underline {
+        style.run_property.underline = Some(Underline::new("single"));
+    }
+    if let Some(ref family) = css.font_family {
+        let fonts = RunFonts::new()
+            .ascii(family)
+            .hi_ansi(family)
+            .east_asia(family)
+            .cs(family);
+        style.run_property.fonts = Some(fonts);
+    }
+    if let Some(lh) = css.line_height {
+        let spacing = (lh * 20.0) as i32;
+        style.paragraph_property = style
+            .paragraph_property
+            .clone()
+            .line_spacing(LineSpacing::new().line(spacing).line_rule(LineSpacingType::Exact))
+            .text_alignment(TextAlignmentType::Center);
+    }
+    if let Some(ref color) = css.background_color {
+        style.paragraph_property = style
+            .paragraph_property
+            .clone()
+            .shading(Shading::new().fill(color));
+    }
+    // border support
+    let has_border = css.border_top.is_some()
+        || css.border_bottom.is_some()
+        || css.border_left.is_some()
+        || css.border_right.is_some();
+    if has_border {
+        let mut borders = ParagraphBorders::with_empty();
+        if let Some(ref b) = css.border_top {
+            borders = borders.set(css_border_to_docx(b, ParagraphBorderPosition::Top));
+        }
+        if let Some(ref b) = css.border_bottom {
+            borders = borders.set(css_border_to_docx(b, ParagraphBorderPosition::Bottom));
+        }
+        if let Some(ref b) = css.border_left {
+            borders = borders.set(css_border_to_docx(b, ParagraphBorderPosition::Left));
+        }
+        if let Some(ref b) = css.border_right {
+            borders = borders.set(css_border_to_docx(b, ParagraphBorderPosition::Right));
+        }
+        style.paragraph_property = style.paragraph_property.clone().set_borders(borders);
+    }
+}
+
+pub fn css_border_to_docx(css: &CssBorder, pos: ParagraphBorderPosition) -> ParagraphBorder {
+    let border_type = match css.style.as_str() {
+        "solid" => BorderType::Single,
+        "double" => BorderType::Double,
+        "dotted" => BorderType::Dotted,
+        "dashed" => BorderType::Dashed,
+        "none" => BorderType::Nil,
+        _ => BorderType::Single,
+    };
+    let size = (css.size_px * 8.0) as usize;
+    ParagraphBorder::new(pos)
+        .val(border_type)
+        .size(size)
+        .color(&css.color)
 }

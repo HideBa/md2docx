@@ -1,5 +1,6 @@
 mod config;
 mod converter;
+mod css;
 mod heading;
 mod ir;
 mod parser;
@@ -24,7 +25,8 @@ use crate::config::Config;
   mdd document.md                          入力と同名の .docx を生成
   mdd document.md -o report.docx           出力先を指定
   mdd document.md -c mdd.toml              設定ファイルを指定
-  mdd document.md -o out.docx -c my.toml   両方指定
+  mdd document.md --css styles.css         CSS スタイルを適用
+  mdd document.md -o out.docx -c my.toml --css styles.css
 
 設定ファイル (TOML):
   省略時はデフォルト値が使われます。全項目省略可能。
@@ -68,14 +70,26 @@ use crate::config::Config;
   level2 = \"▲\"                # 箇条書きレベル2
 
   [numbering]
+  heading_numbering = true          # 見出しの自動採番（省略時: true）
   figure_format = \"sequential\"   # 図番号の形式（sequential / chapter）
   table_format  = \"sequential\"   # 表番号の形式（sequential / chapter）
 
+  [toc]
+  enable    = false                 # 目次の生成（省略時: false）
+  min_level = 1                     # 目次に含める最小見出しレベル
+  max_level = 3                     # 目次に含める最大見出しレベル
+
+  [spacing]                       # 単位: pt
+  line   = 18.0                   # 行間（省略時: Word既定）
+  before = 6.0                    # 段落前の間隔（省略時: なし）
+  after  = 6.0                    # 段落後の間隔（省略時: なし）
+
 対応する Markdown 要素:
   見出し (H1-H5, 自動採番)    段落                  箇条書き (ネスト対応)
-  番号付きリスト (ネスト対応)  表 (自動表番号付与)   コードブロック
-  画像 (自動図番号付与)        水平線
-  インライン: テキスト / コード / 太字 / 斜体 / リンク"
+  番号付きリスト (ネスト対応)  表 (自動表番号付与)   コードブロック (CSS対応)
+  画像 (自動図番号付与)        水平線                引用 (CSS対応)
+  div装飾 (<div class=\"...\">)
+  インライン: テキスト / コード / 太字 / 斜体 / リンク / span装飾"
 )]
 struct Cli {
     /// 変換する Markdown ファイルのパス
@@ -88,6 +102,10 @@ struct Cli {
     /// 設定ファイルパス (TOML) [省略時: デフォルト設定]
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// CSS ファイルパス [省略時: CSS スタイルなし]
+    #[arg(long, value_name = "FILE")]
+    css: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -112,6 +130,15 @@ fn main() -> Result<()> {
         p
     });
 
+    // CSS ファイルの読み込み
+    let css_rules = match &cli.css {
+        Some(path) => Some(
+            css::load_css(path)
+                .with_context(|| format!("CSS ファイルの読み込みに失敗: {}", path.display()))?,
+        ),
+        None => None,
+    };
+
     // ベースパス（画像の相対パス解決用）
     let base_path = input_path.parent().unwrap_or_else(|| Path::new("."));
 
@@ -119,7 +146,7 @@ fn main() -> Result<()> {
     let blocks = parser::parse_markdown(&markdown);
 
     // IR → docx
-    let docx = converter::convert_to_docx(&blocks, &config, base_path)?;
+    let docx = converter::convert_to_docx(&blocks, &config, css_rules.as_ref(), base_path)?;
 
     // ファイル書き出し
     let file = std::fs::File::create(&output_path)

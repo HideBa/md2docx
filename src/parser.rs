@@ -3,16 +3,64 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use crate::ir::{Alignment, Block, Inline, ListItem};
 
 pub fn parse_markdown(input: &str) -> Vec<Block> {
+    let preprocessed = preprocess_div_tags(input);
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let parser = Parser::new_ext(input, options);
+    let parser = Parser::new_ext(&preprocessed, options);
     let events: Vec<Event> = parser.collect();
 
     let converter = EventConverter::new();
     converter.convert(&events)
+}
+
+/// <div class="..."> と </div> の後に空行がない場合、空行を挿入する。
+/// pulldown-cmark が各タグを独立した HTML ブロックとして認識するために必要。
+fn preprocess_div_tags(input: &str) -> String {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut result = String::with_capacity(input.len() + 64);
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // 単一行: <div class="...">content</div> → 複数行に分割
+        if extract_div_class(trimmed).is_some() {
+            if let Some(gt_pos) = trimmed.find('>') {
+                let after_open = &trimmed[gt_pos + 1..];
+                if let Some(close_pos) = after_open.find("</div>") {
+                    let opening_tag = &trimmed[..gt_pos + 1];
+                    let content = after_open[..close_pos].trim();
+                    result.push_str(opening_tag);
+                    result.push_str("\n\n");
+                    if !content.is_empty() {
+                        result.push_str(content);
+                        result.push_str("\n\n");
+                    }
+                    result.push_str("</div>\n");
+                    let next_is_blank =
+                        i + 1 >= lines.len() || lines[i + 1].trim().is_empty();
+                    if !next_is_blank {
+                        result.push('\n');
+                    }
+                    continue;
+                }
+            }
+        }
+
+        result.push_str(line);
+        result.push('\n');
+        let is_div_tag =
+            extract_div_class(trimmed).is_some() || trimmed.starts_with("</div>");
+        if is_div_tag {
+            let next_is_blank =
+                i + 1 >= lines.len() || lines[i + 1].trim().is_empty();
+            if !next_is_blank {
+                result.push('\n');
+            }
+        }
+    }
+    result
 }
 
 struct EventConverter {
@@ -25,6 +73,9 @@ struct EventConverter {
     current_image_path: Option<String>,
     current_code_lang: Option<String>,
     current_link_url: Option<String>,
+    span_class_stack: Vec<String>,
+    div_class_stack: Vec<String>,
+    div_blocks_stack: Vec<Vec<Block>>,
 }
 
 struct ListContext {
@@ -56,6 +107,9 @@ impl EventConverter {
             current_image_path: None,
             current_code_lang: None,
             current_link_url: None,
+            span_class_stack: Vec::new(),
+            div_class_stack: Vec::new(),
+            div_blocks_stack: Vec::new(),
         }
     }
 
@@ -91,6 +145,12 @@ impl EventConverter {
             }
             Event::HardBreak => {
                 self.push_inline(Inline::HardBreak);
+            }
+            Event::InlineHtml(html) => {
+                self.handle_inline_html(html);
+            }
+            Event::Html(html) => {
+                self.handle_block_html(html);
             }
             Event::Rule => {
                 self.add_block(Block::ThematicBreak);
@@ -311,8 +371,36 @@ impl EventConverter {
         }
     }
 
+    fn handle_block_html(&mut self, html: &str) {
+        for line in html.lines() {
+            let trimmed = line.trim();
+            if let Some(class) = extract_div_class(trimmed) {
+                self.div_class_stack.push(class);
+                self.div_blocks_stack.push(Vec::new());
+            } else if trimmed.starts_with("</div>") && !self.div_class_stack.is_empty() {
+                let class = self.div_class_stack.pop().unwrap();
+                let children = self.div_blocks_stack.pop().unwrap_or_default();
+                self.add_block(Block::StyledDiv { class, children });
+            }
+        }
+    }
+
+    fn handle_inline_html(&mut self, html: &str) {
+        let html_trimmed = html.trim();
+        if let Some(class) = extract_span_class(html_trimmed) {
+            self.span_class_stack.push(class);
+            self.inline_stack.push(Vec::new());
+        } else if html_trimmed == "</span>" && !self.span_class_stack.is_empty() {
+            let class = self.span_class_stack.pop().unwrap();
+            let children = self.inline_stack.pop().unwrap_or_default();
+            self.push_inline(Inline::StyledSpan { class, children });
+        }
+    }
+
     fn add_block(&mut self, block: Block) {
-        if self.in_block_quote {
+        if !self.div_blocks_stack.is_empty() {
+            self.div_blocks_stack.last_mut().unwrap().push(block);
+        } else if self.in_block_quote {
             self.block_quote_blocks.push(block);
         } else if !self.list_stack.is_empty() {
             // リスト内のネストされたブロック
@@ -335,6 +423,51 @@ impl EventConverter {
             self.blocks.push(block);
         }
     }
+}
+
+fn extract_span_class(html: &str) -> Option<String> {
+    let s = html.trim();
+    if !s.starts_with("<span") || !s.ends_with('>') {
+        return None;
+    }
+    // Find class="..." or class='...'
+    let class_idx = s.find("class=")?;
+    let after = &s[class_idx + 6..];
+    let (quote, rest) = if after.starts_with('"') {
+        ('"', &after[1..])
+    } else if after.starts_with('\'') {
+        ('\'', &after[1..])
+    } else {
+        return None;
+    };
+    let end = rest.find(quote)?;
+    let class_name = rest[..end].trim().to_string();
+    if class_name.is_empty() {
+        return None;
+    }
+    Some(class_name)
+}
+
+fn extract_div_class(html: &str) -> Option<String> {
+    let s = html.trim();
+    if !s.starts_with("<div") || !s.ends_with('>') {
+        return None;
+    }
+    let class_idx = s.find("class=")?;
+    let after = &s[class_idx + 6..];
+    let (quote, rest) = if after.starts_with('"') {
+        ('"', &after[1..])
+    } else if after.starts_with('\'') {
+        ('\'', &after[1..])
+    } else {
+        return None;
+    };
+    let end = rest.find(quote)?;
+    let class_name = rest[..end].trim().to_string();
+    if class_name.is_empty() {
+        return None;
+    }
+    Some(class_name)
 }
 
 fn heading_level_to_u8(level: &HeadingLevel) -> u8 {
@@ -371,6 +504,99 @@ mod tests {
     }
 
     #[test]
+    fn parses_span_class_to_styled_span() {
+        let blocks = parse_markdown("text <span class=\"warning\">important</span> end");
+        assert_eq!(blocks.len(), 1);
+
+        match &blocks[0] {
+            Block::Paragraph { content } => {
+                let span = content.iter().find(|i| matches!(i, Inline::StyledSpan { .. }));
+                assert!(span.is_some(), "StyledSpan should be found");
+                match span.unwrap() {
+                    Inline::StyledSpan { class, children } => {
+                        assert_eq!(class, "warning");
+                        assert_eq!(children.len(), 1);
+                        assert!(matches!(&children[0], Inline::Text(t) if t == "important"));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_span_class_parses_correctly() {
+        assert_eq!(
+            super::extract_span_class("<span class=\"warning\">"),
+            Some("warning".to_string())
+        );
+        assert_eq!(
+            super::extract_span_class("<span class='info'>"),
+            Some("info".to_string())
+        );
+        assert_eq!(super::extract_span_class("</span>"), None);
+        assert_eq!(super::extract_span_class("<div class=\"x\">"), None);
+    }
+
+    #[test]
+    fn extract_div_class_parses_correctly() {
+        assert_eq!(
+            super::extract_div_class("<div class=\"todo\">"),
+            Some("todo".to_string())
+        );
+        assert_eq!(
+            super::extract_div_class("<div class='info'>"),
+            Some("info".to_string())
+        );
+        assert_eq!(super::extract_div_class("</div>"), None);
+        assert_eq!(super::extract_div_class("<span class=\"x\">"), None);
+    }
+
+    #[test]
+    fn parses_div_block_to_styled_div() {
+        let md = "<div class=\"todo\">\n\nSome text.\n\n</div>\n";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 1);
+
+        match &blocks[0] {
+            Block::StyledDiv { class, children } => {
+                assert_eq!(class, "todo");
+                assert!(!children.is_empty());
+                match &children[0] {
+                    Block::Paragraph { content } => {
+                        assert!(matches!(&content[0], Inline::Text(t) if t == "Some text."));
+                    }
+                    other => panic!("unexpected child block: {other:?}"),
+                }
+            }
+            other => panic!("expected StyledDiv, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_blockquote() {
+        let md = "> Quoted text.\n";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 1);
+
+        match &blocks[0] {
+            Block::BlockQuote { children } => {
+                assert_eq!(children.len(), 1);
+                match &children[0] {
+                    Block::Paragraph { content } => {
+                        assert!(
+                            matches!(&content[0], Inline::Text(t) if t == "Quoted text.")
+                        );
+                    }
+                    other => panic!("unexpected child: {other:?}"),
+                }
+            }
+            other => panic!("expected BlockQuote, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn does_not_mix_urls_between_multiple_links() {
         let blocks = parse_markdown("[A](https://a.example) [B](https://b.example)");
         assert_eq!(blocks.len(), 1);
@@ -394,5 +620,35 @@ mod tests {
             }
             other => panic!("unexpected block: {other:?}"),
         }
+    }
+
+    #[test]
+    fn single_line_div_does_not_swallow_following_content() {
+        let md = "# Before\n\n<div class=\"todo\">TODO: text</div>\nAfter div.\n\n## Also after\n";
+        let blocks = parse_markdown(md);
+        assert!(blocks.len() >= 3, "got {} blocks: {blocks:?}", blocks.len());
+        assert!(matches!(&blocks[0], Block::Heading { level: 1, .. }));
+        assert!(matches!(&blocks[1], Block::StyledDiv { .. }));
+        // "After div." and "## Also after" must be present
+        let has_after = blocks.iter().any(|b| matches!(b, Block::Paragraph { content } if content.iter().any(|i| matches!(i, Inline::Text(t) if t.contains("After div")))));
+        assert!(has_after, "paragraph after div is missing: {blocks:?}");
+    }
+
+    #[test]
+    fn div_followed_by_content_without_blank_line() {
+        let md = "<div class=\"todo\">\n\nTODO item.\n\n</div>\nAfter div.\n";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 2, "should have StyledDiv + Paragraph");
+        assert!(matches!(&blocks[0], Block::StyledDiv { .. }));
+        assert!(matches!(&blocks[1], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn div_with_content_after_blank_line_still_works() {
+        let md = "<div class=\"todo\">\n\nTODO item.\n\n</div>\n\nAfter div.\n";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 2);
+        assert!(matches!(&blocks[0], Block::StyledDiv { .. }));
+        assert!(matches!(&blocks[1], Block::Paragraph { .. }));
     }
 }

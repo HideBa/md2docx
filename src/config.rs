@@ -13,6 +13,16 @@ pub struct BulletConfig {
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub struct SpacingConfig {
+    /// 行間 (pt単位)
+    pub line: Option<f64>,
+    /// 段落前の間隔 (pt単位)
+    pub before: Option<f64>,
+    /// 段落後の間隔 (pt単位)
+    pub after: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub fonts: FontConfig,
@@ -26,6 +36,10 @@ pub struct Config {
     pub bullet: BulletConfig,
     #[serde(default)]
     pub numbering: NumberingConfig,
+    #[serde(default)]
+    pub spacing: SpacingConfig,
+    #[serde(default)]
+    pub toc: TocConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +90,8 @@ pub struct PageConfig {
     pub margin_footer: i32,
     #[serde(default = "default_page_margin_gutter")]
     pub margin_gutter: i32,
+    #[serde(default)]
+    pub image_max_height: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +194,22 @@ pub struct NumberingConfig {
     pub figure_format: String,
     #[serde(default = "default_table_format")]
     pub table_format: String,
+    #[serde(default)]
+    pub h1_title: bool,
+    #[serde(default = "default_heading_numbering_depth")]
+    pub heading_numbering_depth: u8,
+    #[serde(default = "default_heading_numbering")]
+    pub heading_numbering: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TocConfig {
+    #[serde(default)]
+    pub enable: bool,
+    #[serde(default = "default_toc_min_level")]
+    pub min_level: usize,
+    #[serde(default = "default_toc_max_level")]
+    pub max_level: usize,
 }
 
 fn default_figure_format() -> String {
@@ -186,12 +218,37 @@ fn default_figure_format() -> String {
 fn default_table_format() -> String {
     "sequential".to_string()
 }
+fn default_heading_numbering_depth() -> u8 {
+    5
+}
+fn default_heading_numbering() -> bool {
+    true
+}
+fn default_toc_min_level() -> usize {
+    1
+}
+fn default_toc_max_level() -> usize {
+    3
+}
 
 impl Default for NumberingConfig {
     fn default() -> Self {
         Self {
             figure_format: default_figure_format(),
             table_format: default_table_format(),
+            h1_title: false,
+            heading_numbering_depth: default_heading_numbering_depth(),
+            heading_numbering: default_heading_numbering(),
+        }
+    }
+}
+
+impl Default for TocConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            min_level: default_toc_min_level(),
+            max_level: default_toc_max_level(),
         }
     }
 }
@@ -242,6 +299,7 @@ impl Default for PageConfig {
             margin_header: default_page_margin_header(),
             margin_footer: default_page_margin_footer(),
             margin_gutter: default_page_margin_gutter(),
+            image_max_height: None,
         }
     }
 }

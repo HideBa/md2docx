@@ -47,6 +47,10 @@ pub enum Block {
     BlockQuote {
         children: Vec<Block>,
     },
+    StyledDiv {
+        class: String,
+        children: Vec<Block>,
+    },
     ThematicBreak,
 }
 
@@ -57,6 +61,7 @@ pub enum Inline {
     Bold(Vec<Inline>),
     Italic(Vec<Inline>),
     Link { text: Vec<Inline>, url: String },
+    StyledSpan { class: String, children: Vec<Inline> },
     SoftBreak,
     HardBreak,
 }
@@ -70,7 +75,9 @@ impl Inline {
             Inline::Bold(children) | Inline::Italic(children) => {
                 children.iter().map(|c| c.to_plain_text()).collect()
             }
-            Inline::Link { text, .. } => text.iter().map(|c| c.to_plain_text()).collect(),
+            Inline::Link { text, .. } | Inline::StyledSpan { children: text, .. } => {
+                text.iter().map(|c| c.to_plain_text()).collect()
+            }
             Inline::SoftBreak | Inline::HardBreak => String::new(),
         }
     }
