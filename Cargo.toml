@@ -9,9 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 pulldown-cmark = { version = "0.12", features = ["simd"] }
-docx-rs = { git = "https://github.com/keiya01/docx-rs.git", branch = "fix/paragraph-shading" }
+docx-rs = { git = "https://github.com/keiya01/docx-rs.git", branch = "feat/math" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 image = "0.25"
 anyhow = "1"
+mitex-parser = "0.2"
+mitex-spec = "0.2"
+rowan = "0.15"

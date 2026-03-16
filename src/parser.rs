@@ -8,6 +8,7 @@ pub fn parse_markdown(input: &str) -> Vec<Block> {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_MATH);
 
     let parser = Parser::new_ext(&preprocessed, options);
     let events: Vec<Event> = parser.collect();
@@ -68,8 +69,7 @@ struct EventConverter {
     inline_stack: Vec<Vec<Inline>>,
     list_stack: Vec<ListContext>,
     table_state: Option<TableState>,
-    in_block_quote: bool,
-    block_quote_blocks: Vec<Block>,
+    block_quote_stack: Vec<Vec<Block>>,
     current_image_path: Option<String>,
     current_code_lang: Option<String>,
     current_link_url: Option<String>,
@@ -102,8 +102,7 @@ impl EventConverter {
             inline_stack: Vec::new(),
             list_stack: Vec::new(),
             table_state: None,
-            in_block_quote: false,
-            block_quote_blocks: Vec::new(),
+            block_quote_stack: Vec::new(),
             current_image_path: None,
             current_code_lang: None,
             current_link_url: None,
@@ -151,6 +150,12 @@ impl EventConverter {
             }
             Event::Html(html) => {
                 self.handle_block_html(html);
+            }
+            Event::InlineMath(math) => {
+                self.push_inline(Inline::InlineMath(math.to_string()));
+            }
+            Event::DisplayMath(math) => {
+                self.add_block(Block::DisplayMath(math.to_string()));
             }
             Event::Rule => {
                 self.add_block(Block::ThematicBreak);
@@ -231,8 +236,7 @@ impl EventConverter {
                 }
             }
             Tag::BlockQuote(_) => {
-                self.in_block_quote = true;
-                self.block_quote_blocks = Vec::new();
+                self.block_quote_stack.push(Vec::new());
             }
             Tag::CodeBlock(kind) => {
                 self.current_code_lang = match kind {
@@ -345,8 +349,7 @@ impl EventConverter {
                 }
             }
             TagEnd::BlockQuote(_) => {
-                let children = std::mem::take(&mut self.block_quote_blocks);
-                self.in_block_quote = false;
+                let children = self.block_quote_stack.pop().unwrap_or_default();
                 self.add_block(Block::BlockQuote { children });
             }
             TagEnd::CodeBlock => {
@@ -400,8 +403,8 @@ impl EventConverter {
     fn add_block(&mut self, block: Block) {
         if !self.div_blocks_stack.is_empty() {
             self.div_blocks_stack.last_mut().unwrap().push(block);
-        } else if self.in_block_quote {
-            self.block_quote_blocks.push(block);
+        } else if !self.block_quote_stack.is_empty() {
+            self.block_quote_stack.last_mut().unwrap().push(block);
         } else if !self.list_stack.is_empty() {
             // リスト内のネストされたブロック
             if let Some(list_ctx) = self.list_stack.last_mut() {
@@ -597,6 +600,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_nested_blockquote() {
+        let md = "> outer\n>\n> > inner\n";
+        let blocks = parse_markdown(md);
+        assert_eq!(blocks.len(), 1);
+
+        match &blocks[0] {
+            Block::BlockQuote { children } => {
+                // outer paragraph + nested blockquote
+                let has_nested = children
+                    .iter()
+                    .any(|b| matches!(b, Block::BlockQuote { .. }));
+                assert!(has_nested, "nested BlockQuote should exist: {children:?}");
+
+                let nested = children
+                    .iter()
+                    .find(|b| matches!(b, Block::BlockQuote { .. }))
+                    .unwrap();
+                match nested {
+                    Block::BlockQuote { children: inner } => {
+                        assert!(!inner.is_empty(), "inner blockquote should have content");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            other => panic!("expected BlockQuote, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn does_not_mix_urls_between_multiple_links() {
         let blocks = parse_markdown("[A](https://a.example) [B](https://b.example)");
         assert_eq!(blocks.len(), 1);
@@ -641,6 +673,35 @@ mod tests {
         assert_eq!(blocks.len(), 2, "should have StyledDiv + Paragraph");
         assert!(matches!(&blocks[0], Block::StyledDiv { .. }));
         assert!(matches!(&blocks[1], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn parses_inline_math() {
+        let blocks = parse_markdown("The equation $x^2$ is simple.");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::Paragraph { content } => {
+                let math = content
+                    .iter()
+                    .find(|i| matches!(i, Inline::InlineMath(_)));
+                assert!(math.is_some(), "InlineMath should be found");
+                match math.unwrap() {
+                    Inline::InlineMath(s) => assert_eq!(s, "x^2"),
+                    _ => unreachable!(),
+                }
+            }
+            other => panic!("expected Paragraph, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_display_math() {
+        let blocks = parse_markdown("$$\\frac{a}{b}$$\n");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::DisplayMath(s) => assert_eq!(s, "\\frac{a}{b}"),
+            other => panic!("expected DisplayMath, got: {other:?}"),
+        }
     }
 
     #[test]

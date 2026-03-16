@@ -3,6 +3,7 @@ mod converter;
 mod css;
 mod heading;
 mod ir;
+mod math;
 mod parser;
 mod styles;
 

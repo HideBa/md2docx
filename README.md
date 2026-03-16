@@ -206,7 +206,7 @@ spacingセクションで本文の行間と段落前後の間隔をpt単位で�
 | `text-decoration`  | `underline` / `none`            | 下線の設定・解除                          |
 | `font-family`      | 文字列（引用符可）              | フォント指定                              |
 | `font-size`        | `Npt`（pt単位のみ）             | フォントサイズ                            |
-| `line-height`      | 数値（1.4等）                   | 行間（h1〜h5のみ）                        |
+| `line-height`      | `Npt`（pt単位のみ）             | 行間（h1〜h5のみ）                        |
 | `border`           | `Npx style #rrggbb`            | 段落ボーダー                              |
 | `border-top`       | `Npx style #rrggbb`            | 段落上ボーダー                            |
 | `border-bottom`    | `Npx style #rrggbb`            | 段落下ボーダー                            |
@@ -225,12 +225,12 @@ spacingセクションで本文の行間と段落前後の間隔をpt単位で�
 ```css
 h1 {
   font-size: 28pt;
-  line-height: 1.4;
+  line-height: 36pt;
 }
 
 h2 {
   font-size: 22pt;
-  line-height: 1.35;
+  line-height: 30pt;
 }
 
 h3 {

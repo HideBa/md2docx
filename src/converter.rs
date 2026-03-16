@@ -139,6 +139,20 @@ impl<'a> ConvertContext<'a> {
                     }
                 }
             }
+            Block::DisplayMath(latex) => {
+                match crate::math::latex_to_omml(latex, true) {
+                    Ok(omml) => {
+                        let para = Paragraph::new().add_math(MathXml::new(omml));
+                        Ok(docx.add_paragraph(para))
+                    }
+                    Err(_) => {
+                        // フォールバック: LaTeX をテキスト出力
+                        let para = Paragraph::new()
+                            .add_run(self.make_body_run(&format!("$${latex}$$")));
+                        Ok(docx.add_paragraph(para))
+                    }
+                }
+            }
             Block::ThematicBreak => {
                 // 水平線 → 空段落で代替
                 Ok(docx.add_paragraph(Paragraph::new()))
@@ -349,6 +363,12 @@ impl<'a> ConvertContext<'a> {
                 }
                 p
             }
+            Inline::InlineMath(latex) => {
+                match crate::math::latex_to_omml(latex, false) {
+                    Ok(omml) => para.add_math(MathXml::new(omml)),
+                    Err(_) => para.add_run(self.make_body_run(&format!("${latex}$"))),
+                }
+            }
             Inline::SoftBreak => para.add_run(Run::new().add_text(" ")),
             Inline::HardBreak => para.add_run(Run::new().add_break(BreakType::TextWrapping)),
         }
@@ -482,6 +502,12 @@ impl<'a> ConvertContext<'a> {
                     }
                 }
                 p
+            }
+            Inline::InlineMath(latex) => {
+                match crate::math::latex_to_omml(latex, false) {
+                    Ok(omml) => para.add_math(MathXml::new(omml)),
+                    Err(_) => para.add_run(self.make_body_run(&format!("${latex}$"))),
+                }
             }
             Inline::SoftBreak => para.add_run(self.make_body_run(" ")),
             Inline::HardBreak => para.add_run(Run::new().add_break(BreakType::TextWrapping)),

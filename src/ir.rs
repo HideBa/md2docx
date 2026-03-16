@@ -51,6 +51,7 @@ pub enum Block {
         class: String,
         children: Vec<Block>,
     },
+    DisplayMath(String),
     ThematicBreak,
 }
 
@@ -62,6 +63,7 @@ pub enum Inline {
     Italic(Vec<Inline>),
     Link { text: Vec<Inline>, url: String },
     StyledSpan { class: String, children: Vec<Inline> },
+    InlineMath(String),
     SoftBreak,
     HardBreak,
 }
@@ -78,6 +80,7 @@ impl Inline {
             Inline::Link { text, .. } | Inline::StyledSpan { children: text, .. } => {
                 text.iter().map(|c| c.to_plain_text()).collect()
             }
+            Inline::InlineMath(s) => format!("${s}$"),
             Inline::SoftBreak | Inline::HardBreak => String::new(),
         }
     }
