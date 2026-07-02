@@ -151,6 +151,8 @@ level2 = "▲"
 heading_numbering = true     # 見出しの自動採番（false で無効化、省略時: true）
 h1_title = false             # H1をタイトル扱いにし採番しない（省略時: false）
 heading_numbering_depth = 5  # 自動採番の対象レベル深さ（省略時: 5）
+figure_numbering = true      # 図キャプション（図番号）の出力（false でキャプションごと非表示、省略時: true）
+table_numbering = true       # 表キャプション（表番号）の出力（false でキャプションごと非表示、省略時: true）
 figure_format = "chapter"    # 図番号の形式: "sequential"（連番）/ "chapter"（章番号付き）（省略時: "sequential"）
 table_format = "chapter"     # 表番号の形式: "sequential" / "chapter"（省略時: "sequential"）
 

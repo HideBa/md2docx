@@ -200,6 +200,10 @@ pub struct NumberingConfig {
     pub heading_numbering_depth: u8,
     #[serde(default = "default_heading_numbering")]
     pub heading_numbering: bool,
+    #[serde(default = "default_figure_numbering")]
+    pub figure_numbering: bool,
+    #[serde(default = "default_table_numbering")]
+    pub table_numbering: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +228,12 @@ fn default_heading_numbering_depth() -> u8 {
 fn default_heading_numbering() -> bool {
     true
 }
+fn default_figure_numbering() -> bool {
+    true
+}
+fn default_table_numbering() -> bool {
+    true
+}
 fn default_toc_min_level() -> usize {
     1
 }
@@ -239,6 +249,8 @@ impl Default for NumberingConfig {
             h1_title: false,
             heading_numbering_depth: default_heading_numbering_depth(),
             heading_numbering: default_heading_numbering(),
+            figure_numbering: default_figure_numbering(),
+            table_numbering: default_table_numbering(),
         }
     }
 }

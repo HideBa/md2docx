@@ -622,52 +622,58 @@ impl<'a> ConvertContext<'a> {
         rows: &[Vec<Vec<Inline>>],
         alignments: &[crate::ir::Alignment],
     ) -> Docx {
-        // 表番号キャプション
-        let caption_fonts = RunFonts::new()
-            .ascii(&self.config.fonts.heading_en)
-            .hi_ansi(&self.config.fonts.heading_en)
-            .east_asia(&self.config.fonts.heading_ja)
-            .cs(&self.config.fonts.heading_en);
-        let body_size = styles::pt_to_half_point(self.config.sizes.body);
+        // 表番号キャプション（table_numbering が有効な場合のみ出力）
+        let docx = if self.config.numbering.table_numbering {
+            let caption_fonts = RunFonts::new()
+                .ascii(&self.config.fonts.heading_en)
+                .hi_ansi(&self.config.fonts.heading_en)
+                .east_asia(&self.config.fonts.heading_ja)
+                .cs(&self.config.fonts.heading_en);
+            let body_size = styles::pt_to_half_point(self.config.sizes.body);
 
-        let table_number = self.next_table_number();
+            let table_number = self.next_table_number();
 
-        let caption_para = match self.config.numbering.table_format.as_str() {
-            "chapter" => {
-                // 章番号モード: "表X.Y" をプレーンテキストで生成
-                let label_run = Run::new()
-                    .add_text(format!("表{}", table_number))
-                    .size(body_size)
-                    .bold()
-                    .fonts(caption_fonts);
-                Paragraph::new()
-                    .add_run(label_run)
-                    .align(AlignmentType::Center)
-            }
-            _ => {
-                // 連番モード: Word SEQ フィールドを使用
-                let label_run = Run::new()
-                    .add_text("表")
-                    .size(body_size)
-                    .bold()
-                    .fonts(caption_fonts.clone());
-                let seq_run = Run::new()
-                    .add_field_char(FieldCharType::Begin, true)
-                    .add_instr_text(InstrText::Unsupported(" SEQ Table \\* ARABIC ".to_string()))
-                    .add_field_char(FieldCharType::Separate, false)
-                    .add_text(&table_number)
-                    .add_field_char(FieldCharType::End, false)
-                    .size(body_size)
-                    .bold()
-                    .fonts(caption_fonts);
-                Paragraph::new()
-                    .add_run(label_run)
-                    .add_run(seq_run)
-                    .align(AlignmentType::Center)
-            }
+            let caption_para = match self.config.numbering.table_format.as_str() {
+                "chapter" => {
+                    // 章番号モード: "表X.Y" をプレーンテキストで生成
+                    let label_run = Run::new()
+                        .add_text(format!("表{}", table_number))
+                        .size(body_size)
+                        .bold()
+                        .fonts(caption_fonts);
+                    Paragraph::new()
+                        .add_run(label_run)
+                        .align(AlignmentType::Center)
+                }
+                _ => {
+                    // 連番モード: Word SEQ フィールドを使用
+                    let label_run = Run::new()
+                        .add_text("表")
+                        .size(body_size)
+                        .bold()
+                        .fonts(caption_fonts.clone());
+                    let seq_run = Run::new()
+                        .add_field_char(FieldCharType::Begin, true)
+                        .add_instr_text(InstrText::Unsupported(
+                            " SEQ Table \\* ARABIC ".to_string(),
+                        ))
+                        .add_field_char(FieldCharType::Separate, false)
+                        .add_text(&table_number)
+                        .add_field_char(FieldCharType::End, false)
+                        .size(body_size)
+                        .bold()
+                        .fonts(caption_fonts);
+                    Paragraph::new()
+                        .add_run(label_run)
+                        .add_run(seq_run)
+                        .align(AlignmentType::Center)
+                }
+            };
+
+            docx.add_paragraph(caption_para)
+        } else {
+            docx
         };
-
-        let docx = docx.add_paragraph(caption_para);
         let column_count = headers
             .len()
             .max(rows.iter().map(|row| row.len()).max().unwrap_or(0));
@@ -840,7 +846,11 @@ impl<'a> ConvertContext<'a> {
             .align(AlignmentType::Center);
 
         let docx = docx.add_paragraph(image_para);
-        self.add_figure_caption(docx, alt)
+        if self.config.numbering.figure_numbering {
+            self.add_figure_caption(docx, alt)
+        } else {
+            docx
+        }
     }
 
     /// 図番号キャプションを追加する共通メソッド

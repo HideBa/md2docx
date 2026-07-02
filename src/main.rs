@@ -72,6 +72,8 @@ use crate::config::Config;
 
   [numbering]
   heading_numbering = true          # 見出しの自動採番（省略時: true）
+  figure_numbering  = true          # 図キャプションの出力（false で非表示、省略時: true）
+  table_numbering   = true          # 表キャプションの出力（false で非表示、省略時: true）
   figure_format = \"sequential\"   # 図番号の形式（sequential / chapter）
   table_format  = \"sequential\"   # 表番号の形式（sequential / chapter）
 
