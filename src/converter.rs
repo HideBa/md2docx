@@ -195,11 +195,22 @@ impl<'a> ConvertContext<'a> {
             level
         };
 
-        // テキストから既存の番号部分を除去（effective_level のフォーマットで検出）
         let plain_text: String = content.iter().map(|i| i.to_plain_text()).collect();
-        let display_text = self
-            .heading_mgr
-            .strip_number(effective_level, plain_text.trim());
+        let depth = self.config.numbering.heading_numbering_depth;
+
+        // この見出しを自動採番するか。h1_title の H1 はタイトル扱いで常に採番しない。
+        let numbering_enabled = self.config.numbering.heading_numbering
+            && level <= depth
+            && !(h1_title && level == 1);
+
+        // 自動採番する場合のみ、原稿に手書きされた番号を除去する。
+        // 採番しない場合は手書き番号をそのまま残す（除去すると番号が消えてしまう）。
+        let display_text = if numbering_enabled {
+            self.heading_mgr
+                .strip_number(effective_level, plain_text.trim())
+        } else {
+            plain_text.trim().to_string()
+        };
 
         // スタイル ID: 見出し1="1", 見出し2="2", ...
         let style_id = level.to_string();
@@ -212,8 +223,6 @@ impl<'a> ConvertContext<'a> {
             .saturating_sub(display_text.chars().count());
         let render_content = strip_prefix_from_inlines(content, prefix_chars);
 
-        let depth = self.config.numbering.heading_numbering_depth;
-
         if h1_title && level == 1 {
             // H1 はタイトルとして番号なしで出力
             let mut para = Paragraph::new();
@@ -223,9 +232,6 @@ impl<'a> ConvertContext<'a> {
             let para = para.style(&style_id).keep_next(true);
             return docx.add_paragraph(para);
         }
-
-        // heading_numbering が無効、または heading_numbering_depth を超えるレベルは採番しない
-        let numbering_enabled = self.config.numbering.heading_numbering && level <= depth;
 
         if numbering_enabled {
             // heading_mgr のカウンタを effective_level で進める
@@ -269,7 +275,15 @@ impl<'a> ConvertContext<'a> {
 
             docx.add_paragraph(para)
         } else {
-            // 採番なし: スタイルのみ適用
+            // 採番なし: スタイルのみ適用。
+            // ただし図表の chapter モード採番のため、章番号だけは追跡する
+            // （見出しの自動採番が無効でも 図2.1 / 表2.1 を正しく出せるようにする）。
+            let is_chapter_heading = if h1_title { level == 2 } else { level == 1 };
+            if is_chapter_heading {
+                self.chapter_number += 1;
+                self.figure_in_chapter = 0;
+                self.table_in_chapter = 0;
+            }
             let mut para = Paragraph::new();
             for inline in &render_content {
                 para = self.add_inline_to_heading(para, inline, false);
